@@ -52,11 +52,12 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
     setIsExporting(true);
     
     // Create a temporary container to render the full content for export
+    // We make it significantly wider than standard portrait to ensure table columns don't wrap/squish
     const tempContainer = document.createElement('div');
     tempContainer.style.position = 'absolute';
     tempContainer.style.left = '-9999px';
     tempContainer.style.top = '0';
-    tempContainer.style.width = '1200px'; // Wide enough for the Test Sheet table
+    tempContainer.style.width = '1700px'; 
     tempContainer.style.backgroundColor = '#ffffff';
     document.body.appendChild(tempContainer);
 
@@ -72,45 +73,58 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
       }
 
       if (!h2p) {
-        throw new Error("PDF library (html2pdf) could not be properly initialized. Try refreshing the page.");
+        throw new Error("PDF library (html2pdf) could not be properly initialized.");
       }
 
       // Clone the content for PDF
       const element = memoRef.current.cloneNode(true) as HTMLElement;
       
-      // CRITICAL: Neutralize all constraints that cause cutting
-      element.style.height = 'auto';
-      element.style.maxHeight = 'none';
-      element.style.overflow = 'visible';
-      element.style.width = '1200px'; 
-      element.style.padding = '40px';
-      
-      // Deep strip all overflow classes and fixed heights from children
-      const children = element.querySelectorAll('*');
-      children.forEach((child: any) => {
-        const style = window.getComputedStyle(child);
-        if (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflow === 'auto') {
-          child.style.overflow = 'visible';
-          child.style.overflowX = 'visible';
-          child.style.width = 'auto';
-          child.style.maxWidth = 'none';
+      // Inject CSS specifically for the export to strip all overflow constraints
+      const exportStyles = document.createElement('style');
+      exportStyles.innerHTML = `
+        .pdf-export-container { 
+          padding: 60px !important; 
+          width: 1700px !important; 
+          background: white !important; 
         }
-        if (style.height !== 'auto' || style.maxHeight !== 'none') {
-          child.style.height = 'auto';
-          child.style.maxHeight = 'none';
+        table { 
+          width: 100% !important; 
+          table-layout: auto !important; 
+          border-collapse: collapse !important; 
+          border: 1px solid #e2e8f0 !important;
+          margin-bottom: 30px !important;
         }
-      });
+        th, td { 
+          border: 1px solid #e2e8f0 !important; 
+          padding: 12px 15px !important; 
+          word-wrap: break-word !important; 
+          white-space: normal !important; 
+        }
+        th { background-color: #f0fdfa !important; font-weight: bold !important; }
+        .overflow-x-auto, .overflow-y-auto { 
+          overflow: visible !important; 
+          width: 100% !important; 
+          max-width: none !important; 
+        }
+        div, section, article { 
+          overflow: visible !important; 
+          max-height: none !important; 
+          max-width: none !important; 
+        }
+        textarea, select, input { display: none !important; }
+        .no-export { display: none !important; }
+      `;
+      tempContainer.appendChild(exportStyles);
+      element.classList.add('pdf-export-container');
 
-      // Static replacement for inputs
+      // Manual replacement of interactive components with static text for the clone
       const textareas = Array.from(element.querySelectorAll('textarea'));
       textareas.forEach(ta => {
         const replacement = document.createElement('div');
         replacement.textContent = ta.value;
         replacement.style.whiteSpace = 'pre-wrap';
         replacement.style.color = '#1e293b';
-        replacement.style.lineHeight = '1.6';
-        replacement.style.padding = '8px 0';
-        replacement.style.fontSize = '14px';
+        replacement.style.padding = '5px 0';
         ta.parentNode?.replaceChild(replacement, ta);
       });
 
@@ -118,39 +132,26 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
       selects.forEach(sel => {
         const replacement = document.createElement('span');
         replacement.textContent = sel.value;
-        replacement.style.fontWeight = '600';
+        replacement.style.fontWeight = 'bold';
         replacement.style.padding = '4px 10px';
         replacement.style.borderRadius = '4px';
-        replacement.style.fontSize = '13px';
-        replacement.style.display = 'inline-block';
-        
-        const val = sel.value.toLowerCase();
-        if (val === 'pass' || val === 'effective') {
-          replacement.style.color = '#15803d';
-          replacement.style.backgroundColor = '#f0fdf4';
-        } else if (val === 'fail' || val === 'ineffective') {
-          replacement.style.color = '#b91c1c';
-          replacement.style.backgroundColor = '#fef2f2';
-        } else {
-          replacement.style.color = '#334155';
-          replacement.style.backgroundColor = '#f8fafc';
-        }
+        replacement.style.backgroundColor = '#f1f5f9';
         sel.parentNode?.replaceChild(replacement, sel);
       });
 
-      // Add a professional header
+      // Add a professional Audit Header
       const pdfHeader = document.createElement('div');
       pdfHeader.innerHTML = `
-        <div style="margin-bottom: 30px; border-bottom: 3px solid #0d9488; padding-bottom: 15px; font-family: 'Inter', sans-serif;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h1 style="color: #134e4a; margin: 0; font-size: 26px; font-weight: bold;">SOX Compliance Testing Memo</h1>
-            <div style="text-align: right; color: #64748b; font-size: 11px;">
-              CONFIDENTIAL - INTERNAL AUDIT USE ONLY
+        <div style="margin-bottom: 40px; border-bottom: 5px solid #0d9488; padding-bottom: 25px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+              <h1 style="color: #134e4a; margin: 0; font-size: 38px; font-weight: 800; letter-spacing: -0.025em;">SOX Compliance Workpaper</h1>
+              <p style="color: #64748b; margin-top: 5px; font-size: 16px; font-weight: 500;">Automated Control Testing Documentation</p>
             </div>
-          </div>
-          <div style="margin-top: 12px; display: flex; gap: 30px; font-size: 13px; color: #475569;">
-            <span><strong>Date Generated:</strong> ${new Date(result.timestamp).toLocaleDateString()}</span>
-            <span><strong>System:</strong> SOX Auditor AI</span>
+            <div style="text-align: right;">
+              <div style="background: #134e4a; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block; margin-bottom: 8px;">CONFIDENTIAL</div>
+              <p style="margin: 0; font-size: 14px; color: #475569;"><strong>Generated:</strong> ${new Date(result.timestamp).toLocaleDateString()}</p>
+            </div>
           </div>
         </div>
       `;
@@ -159,19 +160,18 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
       tempContainer.appendChild(element);
 
       const opt = {
-        margin: [15, 10, 15, 10], 
-        filename: `SOX_Audit_Memo_${new Date().toISOString().split('T')[0]}.pdf`,
+        margin: [10, 10, 10, 10], 
+        filename: `SOX_Audit_Report_${new Date().toISOString().split('T')[0]}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
           scale: 2, 
           useCORS: true, 
           letterRendering: true,
-          scrollY: 0,
-          scrollX: 0,
-          windowWidth: 1200, 
+          windowWidth: 1700, // Capture the full expanded width
           logging: false
         },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        // Orientation is LANDSCAPE to handle the wide Test Sheet table properly
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
       };
 
@@ -179,7 +179,7 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
       
     } catch (error: any) {
       console.error("PDF Export failed:", error);
-      alert(`Export failed: ${error.message || 'Error occurred during PDF generation.'}`);
+      alert(`Export failed: ${error.message || 'Error occurred.'}`);
     } finally {
       if (document.body.contains(tempContainer)) {
         document.body.removeChild(tempContainer);
@@ -265,7 +265,7 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
                 <input 
                     type="text" 
                     className="flex-1 px-4 py-2 text-sm bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder-slate-400"
-                    placeholder="e.g., 'Change the conclusion to failed due to missing approval', 'Update sample size to 25'"
+                    placeholder="e.g., 'Update sample size to 25', 'Change risk assertion to Completeness'"
                     value={refineInput}
                     onChange={(e) => setRefineInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !isRefining && handleRefineSubmit()}

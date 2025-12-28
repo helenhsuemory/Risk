@@ -32,7 +32,7 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 | **Control Description** | [Shortened version of input] |
 | **Control Objective** | [Brief objective derived from Control Description] |
 | **Risk** | [Briefly describe the specific financial reporting risk this control mitigates] |
-| **Risk Assertion** | [Inferred from the control, e.g., Accuracy, Completeness, Existence] |
+| **Risk Assertion** | [Inferred from the control, e.g., Accuracy, Completeness, Existence, Valuation, Cutoff] |
 | **Risk Level** | [Autofill from metadata riskLevel] |
 | **Conclusion Summary** | [Effective / Ineffective] |
 
@@ -52,7 +52,6 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 [Conclusion on whether the control is operating effectively based on the evidence, and if not, explain why]
 `;
 
-// Safety limit: ~800k characters is roughly 200k tokens. 
 const MAX_CHARS_PER_FILE = 800000;
 
 const truncateText = (text: string): string => {
@@ -63,7 +62,6 @@ const truncateText = (text: string): string => {
 const fileToGenerativePart = async (file: File): Promise<Part> => {
   const ext = file.name.split('.').pop()?.toLowerCase();
 
-  // Handle Excel files by converting to CSV text
   if (ext === 'xlsx' || ext === 'xls') {
     try {
       // @ts-ignore
@@ -99,7 +97,6 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
     }
   }
 
-  // Handle Word files by extracting raw text
   if (ext === 'docx') {
     try {
         // @ts-ignore
@@ -122,7 +119,6 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
     }
   }
 
-  // Handle PowerPoint files
   if (ext === 'pptx') {
     try {
         // @ts-ignore
@@ -247,7 +243,7 @@ export const generateAuditMemo = async (data: AuditFormData): Promise<string> =>
     Please strictly follow the structure:
     1. **Testing Overview** (Summary Table with rows: Control Name, Control Description, Control Objective, Risk, Risk Assertion, Risk Level, Conclusion Summary).
     2. **Population and Sample** (Summary Table)
-    3. **Test Sheet** (Markdown Table with columns: **Test Attribute** (labels like A, B, C...), **Test Attribute Description**, **Tickmark**, **Testing Notes**, **Reference**).
+    3. **Test Sheet** (Markdown Table with columns: **Test Attribute** (labels A, B, C, D...), **Test Attribute Description**, **Tickmark**, **Testing Notes**, **Reference**).
     4. **Conclusion**
   `;
 
