@@ -31,6 +31,9 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 | **Control Name** | [Autofill from input] |
 | **Control Description** | [Shortened version of input] |
 | **Control Objective** | [Brief objective derived from Control Description] |
+| **Risk** | [Briefly describe the specific financial reporting risk this control mitigates] |
+| **Risk Assertion** | [Inferred from the control, e.g., Accuracy, Completeness, Existence] |
+| **Risk Level** | [Autofill from metadata riskLevel] |
 | **Conclusion Summary** | [Effective / Ineffective] |
 
 ## Population and Sample
@@ -50,7 +53,6 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 `;
 
 // Safety limit: ~800k characters is roughly 200k tokens. 
-// This leaves plenty of room for other files and system instructions in a 2M context window.
 const MAX_CHARS_PER_FILE = 800000;
 
 const truncateText = (text: string): string => {
@@ -147,7 +149,6 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
                 const slideNum = fileName.match(/slide(\d+)\.xml/)![1];
                 fullText += `\n--- Slide ${slideNum} ---\n${slideText}\n`;
             }
-            // Early break if we already exceeded limit
             if (fullText.length > MAX_CHARS_PER_FILE) break;
         }
 
@@ -171,7 +172,6 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
     }
   }
 
-  // Handle other files (Images, PDFs, EML, CSV)
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -245,13 +245,8 @@ export const generateAuditMemo = async (data: AuditFormData): Promise<string> =>
     I have attached ${data.files.length} file(s) representing the PBC (Provided by Client) documentation. 
     
     Please strictly follow the structure:
-    1. **Testing Overview** (Summary Table)
+    1. **Testing Overview** (Summary Table with rows: Control Name, Control Description, Control Objective, Risk, Risk Assertion, Risk Level, Conclusion Summary).
     2. **Population and Sample** (Summary Table)
-       - Population Completeness: ${populationCompletenessInstruction}
-       - Sample Period: Concise format aligning with frequency.
-       - Sample Size: Number only.
-       - Selection Methodology: e.g., Random, Haphazard.
-       - Special Considerations: Default to "N/A".
     3. **Test Sheet** (Markdown Table with columns: **Test Attribute** (labels like A, B, C...), **Test Attribute Description**, **Tickmark**, **Testing Notes**, **Reference**).
     4. **Conclusion**
   `;
