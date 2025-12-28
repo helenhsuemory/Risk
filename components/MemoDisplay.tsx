@@ -50,8 +50,9 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
     if (!memoRef.current) return;
     setIsExporting(true);
     
-    // Extreme width for high-fidelity landscape capture to prevent any clipping of wide IA test sheets
-    const exportWidth = 2200; 
+    // Use 1200px as a virtual width to allow more horizontal breathing room for audit tables, 
+    // which then scales down to the A4 page.
+    const exportWidth = 1000; 
     
     const tempContainer = document.createElement('div');
     tempContainer.style.position = 'absolute';
@@ -69,92 +70,117 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
       
       const styleOverride = document.createElement('style');
       styleOverride.innerHTML = `
-        .pdf-capture-root { 
+        .pdf-export-body { 
           width: ${exportWidth}px !important; 
-          padding: 80px !important; 
+          padding: 40px !important; 
           background: white !important; 
-          font-family: 'Inter', sans-serif !important;
           color: #000 !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
+          margin: 0 !important;
         }
+        /* Reset and Force wrap */
         * { 
-          overflow: visible !important; 
-          max-width: none !important; 
-          max-height: none !important; 
-          height: auto !important;
+          max-width: 100% !important; 
           box-sizing: border-box !important;
+          overflow: visible !important;
+          word-wrap: break-word !important;
+          overflow-wrap: anywhere !important;
         }
+        h1, h2, h3 { 
+          page-break-after: avoid !important; 
+          color: #134e4a !important;
+          margin-top: 20pt !important;
+          font-weight: bold !important;
+        }
+        h1 { font-size: 24pt !important; margin-top: 0 !important; }
+        h2 { border-bottom: 2pt solid #0d9488 !important; padding-bottom: 5pt !important; font-size: 16pt !important; margin-bottom: 10pt !important; }
+        
         table { 
           width: 100% !important; 
-          table-layout: auto !important; 
+          table-layout: fixed !important; /* CRITICAL: Force fixed layout */
           border-collapse: collapse !important; 
-          border: 1px solid #000 !important;
-          margin: 30px 0 !important;
+          margin: 15pt 0 !important;
+          border: 1pt solid #000 !important;
         }
+        thead { display: table-header-group !important; } /* Repeat headers */
+        tr { page-break-inside: avoid !important; }
         th, td { 
-          border: 1px solid #000 !important; 
-          padding: 15px !important; 
-          font-size: 15px !important;
+          border: 1pt solid #000 !important; 
+          padding: 6pt !important; 
+          font-size: 9pt !important; /* Smaller text for audit workpapers */
           vertical-align: top !important;
-          word-break: break-word !important;
-          line-height: 1.5 !important;
+          line-height: 1.4 !important;
         }
-        th { font-weight: bold !important; background-color: #f1f5f9 !important; }
-        h1, h2, h3 { color: #000 !important; margin-top: 40px !important; }
-        h2 { border-bottom: 2px solid #0d9488 !important; padding-bottom: 10px !important; }
-        textarea, select, input, button { display: none !important; }
+        th { background-color: #f8fafc !important; font-weight: bold !important; text-align: left !important; }
+        
+        /* Column distribution for 2-column tables (Overview/Population) */
+        table:not(.test-sheet) tr th:nth-child(1), table:not(.test-sheet) tr td:nth-child(1) { width: 30% !important; font-weight: bold !important; }
+        table:not(.test-sheet) tr th:nth-child(2), table:not(.test-sheet) tr td:nth-child(2) { width: 70% !important; }
+
+        /* Column distribution for 5-column Test Sheet (Alphabetical attributes) */
+        table.test-sheet tr th:nth-child(1), table.test-sheet tr td:nth-child(1) { width: 5% !important; text-align: center !important; } /* Ref (A, B...) */
+        table.test-sheet tr th:nth-child(2), table.test-sheet tr td:nth-child(2) { width: 25% !important; } /* Description */
+        table.test-sheet tr th:nth-child(3), table.test-sheet tr td:nth-child(3) { width: 10% !important; text-align: center !important; } /* Tickmark */
+        table.test-sheet tr th:nth-child(4), table.test-sheet tr td:nth-child(4) { width: 45% !important; } /* Notes (Primary) */
+        table.test-sheet tr th:nth-child(5), table.test-sheet tr td:nth-child(5) { width: 15% !important; } /* Reference */
+
+        /* Remove UI-specific elements */
+        .no-export, button, .lucide { display: none !important; }
       `;
       tempContainer.appendChild(styleOverride);
-      element.classList.add('pdf-capture-root');
+      element.classList.add('pdf-export-body');
 
-      // Convert dynamic inputs to static text in the clone
+      // Tag the test sheet table for specific widths
+      element.querySelectorAll('table').forEach(tbl => {
+        if (tbl.rows[0]?.cells.length >= 5) {
+          tbl.classList.add('test-sheet');
+        }
+      });
+
+      // Static UI Replacements
       element.querySelectorAll('textarea').forEach(ta => {
         const div = document.createElement('div');
         div.innerText = ta.value;
         div.style.whiteSpace = 'pre-wrap';
-        div.style.padding = '8px 0';
         ta.parentNode?.replaceChild(div, ta);
       });
-
       element.querySelectorAll('select').forEach(sel => {
         const span = document.createElement('span');
         span.innerText = sel.value;
         span.style.fontWeight = 'bold';
-        span.style.padding = '2px 8px';
-        span.style.backgroundColor = '#f1f5f9';
-        span.style.borderRadius = '4px';
         sel.parentNode?.replaceChild(span, sel);
       });
 
       const pdfHeader = document.createElement('div');
       pdfHeader.innerHTML = `
-        <div style="margin-bottom: 60px; border-bottom: 10px solid #0d9488; padding-bottom: 40px;">
-          <h1 style="margin: 0; font-size: 48px; font-weight: 900; color: #134e4a; letter-spacing: -0.05em;">INTERNAL AUDIT WORKPAPER</h1>
-          <div style="margin-top: 25px; display: flex; justify-content: space-between; font-size: 20px; color: #334155;">
-            <span><strong>Workpaper Date:</strong> ${new Date(result.timestamp).toLocaleDateString()}</span>
-            <div style="text-align: right;">
-                <div style="background: #134e4a; color: white; padding: 5px 15px; border-radius: 6px; font-size: 14px; font-weight: bold; margin-bottom: 10px; display: inline-block;">STRICTLY CONFIDENTIAL</div>
-                <br/>
-                <span><strong>Status:</strong> FINAL TESTING REPORT</span>
-            </div>
+        <div style="margin-bottom: 30pt; border-bottom: 5pt solid #0d9488; padding-bottom: 10pt; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h1 style="margin: 0; font-size: 28pt; color: #134e4a; font-weight: 900;">INTERNAL AUDIT</h1>
+            <span style="font-size: 10pt; color: #666; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Control Testing Workpaper</span>
+          </div>
+          <div style="text-align: right; font-size: 9pt; color: #334155;">
+             <div><strong>Ref:</strong> ${result.memo.split('\n')[0].replace('#', '').trim().substring(0, 15)}</div>
+             <div><strong>Date:</strong> ${new Date(result.timestamp).toLocaleDateString()}</div>
+             <div style="color: #0d9488; font-weight: bold; margin-top: 4pt;">STRICTLY CONFIDENTIAL</div>
           </div>
         </div>
       `;
       element.prepend(pdfHeader);
+
       tempContainer.appendChild(element);
 
       const opt = {
-        margin: 10,
-        filename: `Internal_Audit_Report_${new Date().toISOString().slice(0,10)}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
+        margin: [10, 10, 10, 10], // Slim margins to maximize content space
+        filename: `SOX_Workpaper_${new Date().toISOString().slice(0,10)}.pdf`,
+        image: { type: 'jpeg', quality: 1.0 },
         html2canvas: { 
           scale: 2, 
           useCORS: true, 
-          windowWidth: exportWidth, 
-          logging: false,
-          letterRendering: true
+          windowWidth: exportWidth,
+          logging: false 
         },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-        pagebreak: { mode: 'css' }
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
       };
 
       await h2p().set(opt).from(element).save();
@@ -180,7 +206,7 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
         <div>
             <h2 className="text-brand-900 font-bold text-lg flex items-center gap-2">
                 <CheckCircle size={20} className="text-brand-600" />
-                Internal Audit Memo
+                Audit Documentation
             </h2>
             <p className="text-xs text-brand-700 mt-1">{`Created: ${new Date(result.timestamp).toLocaleString()}`}</p>
         </div>
