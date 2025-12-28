@@ -1,8 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { GenerationResult } from '../types';
-import { EditableAuditMemo } from './MarkdownRenderer'; // Importing the now editable component
-import { Copy, CheckCircle, FileCheck, Wand2, Maximize2, PanelLeftOpen } from 'lucide-react';
+import { EditableAuditMemo } from './MarkdownRenderer';
+import { Copy, CheckCircle, FileCheck, Wand2, Maximize2, PanelLeftOpen, FileDown } from 'lucide-react';
+// @ts-ignore
+import html2pdf from 'html2pdf.js';
 
 interface MemoDisplayProps {
   result: GenerationResult | null;
@@ -22,6 +24,8 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
   onToggleInputs
 }) => {
   const [refineInput, setRefineInput] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
+  const memoRef = useRef<HTMLDivElement>(null);
 
   if (!result) {
     return (
@@ -40,6 +44,148 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
   const handleCopy = () => {
     navigator.clipboard.writeText(result.memo);
     alert('Memo copied to clipboard!');
+  };
+
+  const handleExportPDF = async () => {
+    if (!memoRef.current) return;
+    
+    setIsExporting(true);
+    
+    // Create a temporary container to render the full content for export
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.top = '0';
+    tempContainer.style.width = '1200px'; // Wide enough for the Test Sheet table
+    tempContainer.style.backgroundColor = '#ffffff';
+    document.body.appendChild(tempContainer);
+
+    try {
+      // Find the library function defensively
+      let h2p: any = null;
+      if (typeof html2pdf === 'function') {
+        h2p = html2pdf;
+      } else if (html2pdf && typeof html2pdf.default === 'function') {
+        h2p = html2pdf.default;
+      } else if (typeof (window as any).html2pdf === 'function') {
+        h2p = (window as any).html2pdf;
+      }
+
+      if (!h2p) {
+        throw new Error("PDF library (html2pdf) could not be properly initialized. Try refreshing the page.");
+      }
+
+      // Clone the content for PDF
+      const element = memoRef.current.cloneNode(true) as HTMLElement;
+      
+      // CRITICAL: Neutralize all constraints that cause cutting
+      element.style.height = 'auto';
+      element.style.maxHeight = 'none';
+      element.style.overflow = 'visible';
+      element.style.width = '1200px'; 
+      element.style.padding = '40px';
+      
+      // Deep strip all overflow classes and fixed heights from children
+      const children = element.querySelectorAll('*');
+      children.forEach((child: any) => {
+        const style = window.getComputedStyle(child);
+        if (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflow === 'auto') {
+          child.style.overflow = 'visible';
+          child.style.overflowX = 'visible';
+          child.style.width = 'auto';
+          child.style.maxWidth = 'none';
+        }
+        if (style.height !== 'auto' || style.maxHeight !== 'none') {
+          child.style.height = 'auto';
+          child.style.maxHeight = 'none';
+        }
+      });
+
+      // Static replacement for inputs
+      const textareas = Array.from(element.querySelectorAll('textarea'));
+      textareas.forEach(ta => {
+        const replacement = document.createElement('div');
+        replacement.textContent = ta.value;
+        replacement.style.whiteSpace = 'pre-wrap';
+        replacement.style.color = '#1e293b';
+        replacement.style.lineHeight = '1.6';
+        replacement.style.padding = '8px 0';
+        replacement.style.fontSize = '14px';
+        ta.parentNode?.replaceChild(replacement, ta);
+      });
+
+      const selects = Array.from(element.querySelectorAll('select'));
+      selects.forEach(sel => {
+        const replacement = document.createElement('span');
+        replacement.textContent = sel.value;
+        replacement.style.fontWeight = '600';
+        replacement.style.padding = '4px 10px';
+        replacement.style.borderRadius = '4px';
+        replacement.style.fontSize = '13px';
+        replacement.style.display = 'inline-block';
+        
+        const val = sel.value.toLowerCase();
+        if (val === 'pass' || val === 'effective') {
+          replacement.style.color = '#15803d';
+          replacement.style.backgroundColor = '#f0fdf4';
+        } else if (val === 'fail' || val === 'ineffective') {
+          replacement.style.color = '#b91c1c';
+          replacement.style.backgroundColor = '#fef2f2';
+        } else {
+          replacement.style.color = '#334155';
+          replacement.style.backgroundColor = '#f8fafc';
+        }
+        sel.parentNode?.replaceChild(replacement, sel);
+      });
+
+      // Add a professional header
+      const pdfHeader = document.createElement('div');
+      pdfHeader.innerHTML = `
+        <div style="margin-bottom: 30px; border-bottom: 3px solid #0d9488; padding-bottom: 15px; font-family: 'Inter', sans-serif;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="color: #134e4a; margin: 0; font-size: 26px; font-weight: bold;">SOX Compliance Testing Memo</h1>
+            <div style="text-align: right; color: #64748b; font-size: 11px;">
+              CONFIDENTIAL - INTERNAL AUDIT USE ONLY
+            </div>
+          </div>
+          <div style="margin-top: 12px; display: flex; gap: 30px; font-size: 13px; color: #475569;">
+            <span><strong>Date Generated:</strong> ${new Date(result.timestamp).toLocaleDateString()}</span>
+            <span><strong>System:</strong> SOX Auditor AI</span>
+          </div>
+        </div>
+      `;
+      element.prepend(pdfHeader);
+      
+      tempContainer.appendChild(element);
+
+      const opt = {
+        margin: [15, 10, 15, 10], 
+        filename: `SOX_Audit_Memo_${new Date().toISOString().split('T')[0]}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true, 
+          letterRendering: true,
+          scrollY: 0,
+          scrollX: 0,
+          windowWidth: 1200, 
+          logging: false
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      };
+
+      await h2p().set(opt).from(element).save();
+      
+    } catch (error: any) {
+      console.error("PDF Export failed:", error);
+      alert(`Export failed: ${error.message || 'Error occurred during PDF generation.'}`);
+    } finally {
+      if (document.body.contains(tempContainer)) {
+        document.body.removeChild(tempContainer);
+      }
+      setIsExporting(false);
+    }
   };
 
   const handleRefineSubmit = async () => {
@@ -79,6 +225,20 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
              )}
           </button>
           <div className="w-px h-6 bg-brand-200 mx-1"></div>
+          
+          <button
+              onClick={handleExportPDF}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200 disabled:opacity-50"
+          >
+              {isExporting ? (
+                <span className="animate-spin h-4 w-4 border-2 border-brand-600 border-t-transparent rounded-full"></span>
+              ) : (
+                <FileDown size={16} />
+              )}
+              Export PDF
+          </button>
+
           <button
               onClick={handleCopy}
               className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200"
@@ -89,12 +249,7 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-8 bg-white">
-        {/* 
-          We use result.timestamp as the key to force a re-mount ONLY when 
-          a NEW memo is generated or refined. This preserves local focus and 
-          cursor state during manual edits, as onUpdate won't trigger a key change.
-        */}
+      <div className="flex-1 overflow-y-auto p-8 bg-white" ref={memoRef}>
         <EditableAuditMemo 
             key={result.timestamp} 
             initialContent={result.memo} 

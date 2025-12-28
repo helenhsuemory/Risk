@@ -10,7 +10,7 @@ Your goal is to:
 2. **Generate a Test Sheet**: 
    - Document your testing in a structured Markdown Table.
    - The table MUST strictly include the following columns in this order:
-     1. **Test Attribute**: The standard testing attribute category (e.g., Existence, Accuracy, Completeness).
+     1. **Test Attribute**: DO NOT use category names like "Existence" or "Accuracy". Instead, use alphabetical labels starting from "A" for each row (e.g., A, B, C, D...).
      2. **Test Attribute Description**: 
         - If "Testing Attributes" are provided in the input, use those specific values.
         - If "Testing Attributes" are NOT provided, you MUST develop specific testing procedures. These procedures MUST start with an action verb (e.g., "Inspect", "Validate", "Reperform", "Verify", "Agree") and describe the action taken.
@@ -49,13 +49,21 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 [Conclusion on whether the control is operating effectively based on the evidence, and if not, explain why]
 `;
 
+// Safety limit: ~800k characters is roughly 200k tokens. 
+// This leaves plenty of room for other files and system instructions in a 2M context window.
+const MAX_CHARS_PER_FILE = 800000;
+
+const truncateText = (text: string): string => {
+  if (text.length <= MAX_CHARS_PER_FILE) return text;
+  return text.substring(0, MAX_CHARS_PER_FILE) + "\n\n[CONTENT TRUNCATED DUE TO SIZE LIMITS FOR THIS FILE]";
+};
+
 const fileToGenerativePart = async (file: File): Promise<Part> => {
   const ext = file.name.split('.').pop()?.toLowerCase();
 
   // Handle Excel files by converting to CSV text
   if (ext === 'xlsx' || ext === 'xls') {
     try {
-      // Dynamically import xlsx
       // @ts-ignore
       const XLSX = await import('xlsx');
       const arrayBuffer = await file.arrayBuffer();
@@ -74,7 +82,8 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
         content = "Empty Excel file or no readable data found.";
       }
 
-      const base64Data = btoa(unescape(encodeURIComponent(content)));
+      const truncatedContent = truncateText(content);
+      const base64Data = btoa(unescape(encodeURIComponent(truncatedContent)));
 
       return {
         inlineData: {
@@ -91,12 +100,11 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
   // Handle Word files by extracting raw text
   if (ext === 'docx') {
     try {
-        // Dynamically import mammoth
         // @ts-ignore
         const mammoth = await import('mammoth');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-        const textContent = result.value;
+        const textContent = truncateText(result.value);
         
         const base64Data = btoa(unescape(encodeURIComponent(textContent)));
 
@@ -119,12 +127,10 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
         const JSZip = (await import('jszip')).default;
         const zip = await JSZip.loadAsync(await file.arrayBuffer());
         
-        // Filter for slide XML files
         const slideFiles = Object.keys(zip.files).filter(name => 
             name.match(/^ppt\/slides\/slide\d+\.xml$/)
         );
 
-        // Sort slides numerically
         slideFiles.sort((a, b) => {
             const numA = parseInt(a.match(/slide(\d+)\.xml/)![1]);
             const numB = parseInt(b.match(/slide(\d+)\.xml/)![1]);
@@ -135,20 +141,22 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
 
         for (const fileName of slideFiles) {
             const slideXml = await zip.files[fileName].async("string");
-            // Extract text from <a:t> tags (PowerPoint text)
             const matches = slideXml.match(/<a:t[^>]*>(.*?)<\/a:t>/g);
             if (matches) {
                 const slideText = matches.map(m => m.replace(/<\/?a:t[^>]*>/g, '')).join(' ');
                 const slideNum = fileName.match(/slide(\d+)\.xml/)![1];
                 fullText += `\n--- Slide ${slideNum} ---\n${slideText}\n`;
             }
+            // Early break if we already exceeded limit
+            if (fullText.length > MAX_CHARS_PER_FILE) break;
         }
 
         if (!fullText.trim()) {
             fullText = "Empty PowerPoint file or no readable text found.";
         }
 
-        const base64Data = btoa(unescape(encodeURIComponent(fullText)));
+        const truncatedContent = truncateText(fullText);
+        const base64Data = btoa(unescape(encodeURIComponent(truncatedContent)));
 
         return {
             inlineData: {
@@ -198,7 +206,6 @@ export const generateAuditMemo = async (data: AuditFormData): Promise<string> =>
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Prepare file parts, wrapping them with filename text to provide context for citations
   const filePartsNested = await Promise.all(data.files.map(async (file) => {
     const part = await fileToGenerativePart(file);
     return [
@@ -240,29 +247,18 @@ export const generateAuditMemo = async (data: AuditFormData): Promise<string> =>
     Please strictly follow the structure:
     1. **Testing Overview** (Summary Table)
     2. **Population and Sample** (Summary Table)
-       - Generate a markdown table with columns "Section" and "Content" containing the following rows:
-       - **Population Completeness**: ${populationCompletenessInstruction}
-       - **Sample Period**: Concise format aligning with frequency (e.g., "Q4 FY25" for Quarterly, "Dec 2025" for Monthly, "FY2025" for Annual).
-       - **Sample Size**: Number only (e.g., "1", "25").
-       - **Selection Methodology**: e.g., Random, Haphazard.
-       - **Special Considerations**: Default to "N/A".
-    3. **Test Sheet** (Markdown Table with columns: **Test Attribute**, **Test Attribute Description**, **Tickmark** (Pass/Fail/NA), **Testing Notes**, **Reference**).
-       - **IMPORTANT**: 
-         - **Test Attribute Description**: If input attributes are missing, develop procedures starting with action verbs (Inspect, Validate, Reperform).
-         - **Tickmark**: ONLY use "Pass", "Fail", or "N/A" (plain text).
-         - **Testing Notes**: Detailed observations.
-         - **Reference**: MANDATORY. Explicitly state citation here: "Page [x] in '[filename]'".
+       - Population Completeness: ${populationCompletenessInstruction}
+       - Sample Period: Concise format aligning with frequency.
+       - Sample Size: Number only.
+       - Selection Methodology: e.g., Random, Haphazard.
+       - Special Considerations: Default to "N/A".
+    3. **Test Sheet** (Markdown Table with columns: **Test Attribute** (labels like A, B, C...), **Test Attribute Description**, **Tickmark**, **Testing Notes**, **Reference**).
     4. **Conclusion**
-
-    **Specific Table Instructions:**
-    - In the Testing Overview table, do NOT include "Testing Attributes". Instead, include a row for "**Control Objective**" and derive the objective from the control description.
-
-    **IMPORTANT**: Do NOT include a "Testing Procedure" section.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { text: promptText },
@@ -271,13 +267,16 @@ export const generateAuditMemo = async (data: AuditFormData): Promise<string> =>
       },
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.3, 
+        temperature: 0.1, 
       }
     });
 
     return response.text || "No response generated.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error calling Gemini API:", error);
+    if (error?.message?.includes('token count exceeds')) {
+      throw new Error("The combined size of your evidence files is too large for the AI to process in one go. Please try uploading fewer files or reducing the size of large spreadsheets/documents.");
+    }
     throw new Error("Failed to generate audit memo. Please try again.");
   }
 };
@@ -289,7 +288,6 @@ export const refineAuditMemo = async (data: AuditFormData, currentMemo: string, 
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Re-send files with filename wrappers for context
   const filePartsNested = await Promise.all(data.files.map(async (file) => {
     const part = await fileToGenerativePart(file);
     return [
@@ -309,18 +307,12 @@ export const refineAuditMemo = async (data: AuditFormData, currentMemo: string, 
     **Reviewer Instructions for Update:**
     ${instructions}
 
-    **Task:**
-    1. Update the memo strictly following the reviewer's instructions.
-    2. You have access to the original evidence files if you need to verify information (filenames are provided in wrappers).
-    3. Maintain the existing Markdown structure (tables, headers) unless asked to change it.
-    4. Ensure the Test Sheet table maintains the columns: Test Attribute, Test Attribute Description, Tickmark, Testing Notes, Reference.
-    5. **Tickmark Column**: Keep values strictly as "Pass", "Fail", or "N/A" (plain text).
-    6. Return ONLY the updated Markdown memo. Do not add conversational filler.
+    **Task:** Update the memo strictly following the reviewer's instructions.
   `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { text: promptText },
@@ -328,14 +320,17 @@ export const refineAuditMemo = async (data: AuditFormData, currentMemo: string, 
         ]
       },
       config: {
-        systemInstruction: "You are an expert SOX auditor. You are refining an existing testing memo based on reviewer feedback.",
-        temperature: 0.3, 
+        systemInstruction: "You are an expert SOX auditor refining a testing memo.",
+        temperature: 0.1, 
       }
     });
 
     return response.text || currentMemo;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error calling Gemini API for refinement:", error);
+    if (error?.message?.includes('token count exceeds')) {
+      throw new Error("Update failed because the total content size exceeds limits. Try using more concise instructions or refining smaller sections.");
+    }
     throw new Error("Failed to refine audit memo. Please try again.");
   }
 };
