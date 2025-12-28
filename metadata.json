@@ -1,0 +1,5 @@
+{
+  "name": "SOX Auditor AI",
+  "description": "An AI-powered assistant for automating SOX control testing, evidence review, and documentation generation.",
+  "requestFramePermissions": []
+}
