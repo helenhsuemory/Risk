@@ -48,142 +48,122 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
 
   const handleExportPDF = async () => {
     if (!memoRef.current) return;
-    
     setIsExporting(true);
     
-    // Create a temporary container to render the full content for export
-    // We make it significantly wider than standard portrait to ensure table columns don't wrap/squish
+    // Extreme width for high-fidelity landscape capture to prevent any clipping of wide IA test sheets
+    const exportWidth = 2200; 
+    
     const tempContainer = document.createElement('div');
     tempContainer.style.position = 'absolute';
     tempContainer.style.left = '-9999px';
     tempContainer.style.top = '0';
-    tempContainer.style.width = '1700px'; 
+    tempContainer.style.width = `${exportWidth}px`; 
     tempContainer.style.backgroundColor = '#ffffff';
     document.body.appendChild(tempContainer);
 
     try {
-      // Find the library function defensively
-      let h2p: any = null;
-      if (typeof html2pdf === 'function') {
-        h2p = html2pdf;
-      } else if (html2pdf && typeof html2pdf.default === 'function') {
-        h2p = html2pdf.default;
-      } else if (typeof (window as any).html2pdf === 'function') {
-        h2p = (window as any).html2pdf;
-      }
+      let h2p: any = (html2pdf as any).default || html2pdf;
+      if (typeof (window as any).html2pdf === 'function') h2p = (window as any).html2pdf;
 
-      if (!h2p) {
-        throw new Error("PDF library (html2pdf) could not be properly initialized.");
-      }
-
-      // Clone the content for PDF
       const element = memoRef.current.cloneNode(true) as HTMLElement;
       
-      // Inject CSS specifically for the export to strip all overflow constraints
-      const exportStyles = document.createElement('style');
-      exportStyles.innerHTML = `
-        .pdf-export-container { 
-          padding: 60px !important; 
-          width: 1700px !important; 
+      const styleOverride = document.createElement('style');
+      styleOverride.innerHTML = `
+        .pdf-capture-root { 
+          width: ${exportWidth}px !important; 
+          padding: 80px !important; 
           background: white !important; 
+          font-family: 'Inter', sans-serif !important;
+          color: #000 !important;
+        }
+        * { 
+          overflow: visible !important; 
+          max-width: none !important; 
+          max-height: none !important; 
+          height: auto !important;
+          box-sizing: border-box !important;
         }
         table { 
           width: 100% !important; 
           table-layout: auto !important; 
           border-collapse: collapse !important; 
-          border: 1px solid #e2e8f0 !important;
-          margin-bottom: 30px !important;
+          border: 1px solid #000 !important;
+          margin: 30px 0 !important;
         }
         th, td { 
-          border: 1px solid #e2e8f0 !important; 
-          padding: 12px 15px !important; 
-          word-wrap: break-word !important; 
-          white-space: normal !important; 
+          border: 1px solid #000 !important; 
+          padding: 15px !important; 
+          font-size: 15px !important;
+          vertical-align: top !important;
+          word-break: break-word !important;
+          line-height: 1.5 !important;
         }
-        th { background-color: #f0fdfa !important; font-weight: bold !important; }
-        .overflow-x-auto, .overflow-y-auto { 
-          overflow: visible !important; 
-          width: 100% !important; 
-          max-width: none !important; 
-        }
-        div, section, article { 
-          overflow: visible !important; 
-          max-height: none !important; 
-          max-width: none !important; 
-        }
-        textarea, select, input { display: none !important; }
-        .no-export { display: none !important; }
+        th { font-weight: bold !important; background-color: #f1f5f9 !important; }
+        h1, h2, h3 { color: #000 !important; margin-top: 40px !important; }
+        h2 { border-bottom: 2px solid #0d9488 !important; padding-bottom: 10px !important; }
+        textarea, select, input, button { display: none !important; }
       `;
-      tempContainer.appendChild(exportStyles);
-      element.classList.add('pdf-export-container');
+      tempContainer.appendChild(styleOverride);
+      element.classList.add('pdf-capture-root');
 
-      // Manual replacement of interactive components with static text for the clone
-      const textareas = Array.from(element.querySelectorAll('textarea'));
-      textareas.forEach(ta => {
-        const replacement = document.createElement('div');
-        replacement.textContent = ta.value;
-        replacement.style.whiteSpace = 'pre-wrap';
-        replacement.style.color = '#1e293b';
-        replacement.style.padding = '5px 0';
-        ta.parentNode?.replaceChild(replacement, ta);
+      // Convert dynamic inputs to static text in the clone
+      element.querySelectorAll('textarea').forEach(ta => {
+        const div = document.createElement('div');
+        div.innerText = ta.value;
+        div.style.whiteSpace = 'pre-wrap';
+        div.style.padding = '8px 0';
+        ta.parentNode?.replaceChild(div, ta);
       });
 
-      const selects = Array.from(element.querySelectorAll('select'));
-      selects.forEach(sel => {
-        const replacement = document.createElement('span');
-        replacement.textContent = sel.value;
-        replacement.style.fontWeight = 'bold';
-        replacement.style.padding = '4px 10px';
-        replacement.style.borderRadius = '4px';
-        replacement.style.backgroundColor = '#f1f5f9';
-        sel.parentNode?.replaceChild(replacement, sel);
+      element.querySelectorAll('select').forEach(sel => {
+        const span = document.createElement('span');
+        span.innerText = sel.value;
+        span.style.fontWeight = 'bold';
+        span.style.padding = '2px 8px';
+        span.style.backgroundColor = '#f1f5f9';
+        span.style.borderRadius = '4px';
+        sel.parentNode?.replaceChild(span, sel);
       });
 
-      // Add a professional Audit Header
       const pdfHeader = document.createElement('div');
       pdfHeader.innerHTML = `
-        <div style="margin-bottom: 40px; border-bottom: 5px solid #0d9488; padding-bottom: 25px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end;">
-            <div>
-              <h1 style="color: #134e4a; margin: 0; font-size: 38px; font-weight: 800; letter-spacing: -0.025em;">SOX Compliance Workpaper</h1>
-              <p style="color: #64748b; margin-top: 5px; font-size: 16px; font-weight: 500;">Automated Control Testing Documentation</p>
-            </div>
+        <div style="margin-bottom: 60px; border-bottom: 10px solid #0d9488; padding-bottom: 40px;">
+          <h1 style="margin: 0; font-size: 48px; font-weight: 900; color: #134e4a; letter-spacing: -0.05em;">INTERNAL AUDIT WORKPAPER</h1>
+          <div style="margin-top: 25px; display: flex; justify-content: space-between; font-size: 20px; color: #334155;">
+            <span><strong>Workpaper Date:</strong> ${new Date(result.timestamp).toLocaleDateString()}</span>
             <div style="text-align: right;">
-              <div style="background: #134e4a; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: inline-block; margin-bottom: 8px;">CONFIDENTIAL</div>
-              <p style="margin: 0; font-size: 14px; color: #475569;"><strong>Generated:</strong> ${new Date(result.timestamp).toLocaleDateString()}</p>
+                <div style="background: #134e4a; color: white; padding: 5px 15px; border-radius: 6px; font-size: 14px; font-weight: bold; margin-bottom: 10px; display: inline-block;">STRICTLY CONFIDENTIAL</div>
+                <br/>
+                <span><strong>Status:</strong> FINAL TESTING REPORT</span>
             </div>
           </div>
         </div>
       `;
       element.prepend(pdfHeader);
-      
       tempContainer.appendChild(element);
 
       const opt = {
-        margin: [10, 10, 10, 10], 
-        filename: `SOX_Audit_Report_${new Date().toISOString().split('T')[0]}.pdf`,
+        margin: 10,
+        filename: `Internal_Audit_Report_${new Date().toISOString().slice(0,10)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { 
           scale: 2, 
           useCORS: true, 
-          letterRendering: true,
-          windowWidth: 1700, // Capture the full expanded width
-          logging: false
+          windowWidth: exportWidth, 
+          logging: false,
+          letterRendering: true
         },
-        // Orientation is LANDSCAPE to handle the wide Test Sheet table properly
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        pagebreak: { mode: 'css' }
       };
 
       await h2p().set(opt).from(element).save();
       
     } catch (error: any) {
       console.error("PDF Export failed:", error);
-      alert(`Export failed: ${error.message || 'Error occurred.'}`);
+      alert(`Export failed: ${error.message}`);
     } finally {
-      if (document.body.contains(tempContainer)) {
-        document.body.removeChild(tempContainer);
-      }
+      if (document.body.contains(tempContainer)) document.body.removeChild(tempContainer);
       setIsExporting(false);
     }
   };
@@ -200,72 +180,47 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
         <div>
             <h2 className="text-brand-900 font-bold text-lg flex items-center gap-2">
                 <CheckCircle size={20} className="text-brand-600" />
-                Generated Testing Memo
+                Internal Audit Memo
             </h2>
-            <p className="text-xs text-brand-700 mt-1">
-               {`Generated at ${new Date(result.timestamp).toLocaleTimeString()}`}
-            </p>
+            <p className="text-xs text-brand-700 mt-1">{`Created: ${new Date(result.timestamp).toLocaleString()}`}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onToggleInputs}
             className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200"
-            title={showInputs ? "Expand to full screen" : "Show control inputs"}
           >
-             {showInputs ? (
-                <>
-                    <Maximize2 size={16} />
-                    <span className="hidden sm:inline">Expand</span>
-                </>
-             ) : (
-                <>
-                    <PanelLeftOpen size={16} />
-                    <span className="hidden sm:inline">Edit Inputs</span>
-                </>
-             )}
+             {showInputs ? <Maximize2 size={16} /> : <PanelLeftOpen size={16} />}
+             <span className="hidden sm:inline">{showInputs ? "Expand" : "Show Inputs"}</span>
           </button>
-          <div className="w-px h-6 bg-brand-200 mx-1"></div>
           
           <button
               onClick={handleExportPDF}
               disabled={isExporting}
               className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200 disabled:opacity-50"
           >
-              {isExporting ? (
-                <span className="animate-spin h-4 w-4 border-2 border-brand-600 border-t-transparent rounded-full"></span>
-              ) : (
-                <FileDown size={16} />
-              )}
+              {isExporting ? <span className="animate-spin h-4 w-4 border-2 border-brand-600 border-t-transparent rounded-full"></span> : <FileDown size={16} />}
               Export PDF
           </button>
 
-          <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200"
-          >
+          <button onClick={handleCopy} className="flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 bg-white/50 hover:bg-white px-3 py-1.5 rounded-md transition border border-brand-200">
               <Copy size={16} />
-              Copy Markdown
+              Copy
           </button>
         </div>
       </div>
       
       <div className="flex-1 overflow-y-auto p-8 bg-white" ref={memoRef}>
-        <EditableAuditMemo 
-            key={result.timestamp} 
-            initialContent={result.memo} 
-            onUpdate={onUpdate} 
-        />
+        <EditableAuditMemo key={result.timestamp} initialContent={result.memo} onUpdate={onUpdate} />
       </div>
       
-      {/* AI Refinement Section */}
       <div className="bg-slate-50 px-6 py-4 border-t border-slate-200">
         <div className="flex flex-col space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Reviewer Inputs (AI Refinement)</label>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">IA Refinement Instructions</label>
             <div className="flex gap-2">
                 <input 
                     type="text" 
-                    className="flex-1 px-4 py-2 text-sm bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent placeholder-slate-400"
-                    placeholder="e.g., 'Update sample size to 25', 'Change risk assertion to Completeness'"
+                    className="flex-1 px-4 py-2 text-sm bg-white text-slate-900 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 placeholder-slate-400"
+                    placeholder="e.g., 'Update IA notes for attribute B to reflect Q3 evidence'"
                     value={refineInput}
                     onChange={(e) => setRefineInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && !isRefining && handleRefineSubmit()}
@@ -274,16 +229,9 @@ export const MemoDisplay: React.FC<MemoDisplayProps> = ({
                 <button 
                     onClick={handleRefineSubmit}
                     disabled={isRefining || !refineInput.trim()}
-                    className={`px-4 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2 transition
-                        ${isRefining || !refineInput.trim() 
-                            ? 'bg-brand-300 cursor-not-allowed' 
-                            : 'bg-brand-600 hover:bg-brand-700'}`}
+                    className={`px-4 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2 transition ${isRefining || !refineInput.trim() ? 'bg-brand-300 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700'}`}
                 >
-                    {isRefining ? (
-                        <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-                    ) : (
-                        <Wand2 size={16} />
-                    )}
+                    {isRefining ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> : <Wand2 size={16} />}
                     Refine
                 </button>
             </div>

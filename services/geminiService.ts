@@ -3,27 +3,30 @@ import { GoogleGenAI, Part } from "@google/genai";
 import { AuditFormData } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-You are an expert SOX auditor and compliance analyst. Your task is to assist in automating the control testing process by reviewing supporting evidence and documenting the results.
+You are an expert SOX auditor and Internal Audit (IA) professional. Your task is to assist in automating the control testing process by reviewing supporting evidence and documenting results in a professional audit workpaper format.
 
 Your goal is to:
 1. Review and analyze the PBC (Provided by Client) evidence in the context of the control and testing attributes.
 2. **Generate a Test Sheet**: 
    - Document your testing in a structured Markdown Table.
    - The table MUST strictly include the following columns in this order:
-     1. **Test Attribute**: DO NOT use category names like "Existence" or "Accuracy". Instead, use alphabetical labels starting from "A" for each row (e.g., A, B, C, D...).
+     1. **Test Attribute**: Use alphabetical labels starting from "A" for each row (e.g., A, B, C, D...).
      2. **Test Attribute Description**: 
-        - If "Testing Attributes" are provided in the input, use those specific values.
-        - If "Testing Attributes" are NOT provided, you MUST develop specific testing procedures. These procedures MUST start with an action verb (e.g., "Inspect", "Validate", "Reperform", "Verify", "Agree") and describe the action taken.
+        - **STRICT REQUIREMENT**: If "Testing Attributes" are provided in the input, you MUST test ONLY those specific attributes. DO NOT invent or add additional attributes beyond what the user provided.
+        - If "Testing Attributes" are NOT provided, you MUST develop specific testing procedures starting with an action verb (e.g., "Inspect", "Validate", "Reperform").
      3. **Tickmark**: ONLY use the values "Pass", "Fail", or "N/A" (plain text, no bold).
-     4. **Testing Notes**: Detailed observations including the specific evidence reference (e.g., "Invoice #12345"), what was verified, and any exceptions found. Do NOT include the specific file page citation here; use the Reference column.
-     5. **Reference**: Explicitly state the source here: "Page [X] in '[filename]'" or "Sheet [Name] in '[filename]'".
-   - Ensure every key piece of evidence (e.g., each sample item or key report total) is represented in the table.
+     4. **Testing Notes (IA Documentation Tone)**: 
+        - **MANDATORY TONE**: Use formal Internal Audit documentation language. 
+        - Start notes with phrases like: "Per inspection of the provided evidence, IA determined that...", "IA verified...", "IA noted...", "IA confirmed...", "IA performed a reperformance of...".
+        - Describe specific observations: "IA noted that the [Document] was signed by [Person] on [Date], which is within the required timeframe."
+     5. **Reference**: Explicitly state the source: "Page [X] in '[filename]'" or "Sheet [Name] in '[filename]'".
+   - Ensure every key piece of evidence (e.g., each sample item) is represented in the table as per the provided attributes.
 3. Apply appropriate audit judgment to identify whether the evidence supports the control's operating effectiveness.
 
-Maintain an objective, professional tone. If the evidence is insufficient or missing, clearly state that the control could not be tested effectively.
+Maintain an objective, professional, and skeptical tone. If the evidence is insufficient or missing, clearly state that the control could not be tested effectively.
 
 **Output Structure:**
-Provide the output strictly in the following format. **DO NOT** include a generic "Testing Procedure", "Methodology", or "Approach" section outside of the specific sections requested below.
+Provide the output strictly in the following format.
 
 ## Testing Overview
 | Section | Content |
@@ -34,29 +37,29 @@ Provide the output strictly in the following format. **DO NOT** include a generi
 | **Risk** | [Briefly describe the specific financial reporting risk this control mitigates] |
 | **Risk Assertion** | [Inferred from the control, e.g., Accuracy, Completeness, Existence, Valuation, Cutoff] |
 | **Risk Level** | [Autofill from metadata riskLevel] |
-| **Conclusion Summary** | [Effective / Ineffective] |
+| **Conclusion Summary** | [Effective / Ineffective / Insufficient Evidence] |
 
 ## Population and Sample
 | Section | Content |
 | :--- | :--- |
-| **Population Completeness** | [Follow specific instructions based on frequency] |
-| **Sample Period** | [Concise format aligning with frequency, e.g., "Q4 FY25" or "Dec 2025"] |
-| **Sample Size** | [Number only, e.g., "1", "25"] |
+| **Population Completeness** | [Describe how completeness was validated or noted from PBC] |
+| **Sample Period** | [Concise format, e.g., "Q4 FY25"] |
+| **Sample Size** | [Number only, e.g., "25"] |
 | **Selection Methodology** | [e.g., Random, Haphazard] |
 | **Special Considerations** | [Default to "N/A"] |
 
 ## Test Sheet
-[The structured table defined above]
+[The structured table defined above with IA documentation tone]
 
 ## Conclusion
-[Conclusion on whether the control is operating effectively based on the evidence, and if not, explain why]
+[Formal IA conclusion on whether the control is operating effectively based on the evidence, and if not, explain why using audit terminology]
 `;
 
 const MAX_CHARS_PER_FILE = 800000;
 
 const truncateText = (text: string): string => {
   if (text.length <= MAX_CHARS_PER_FILE) return text;
-  return text.substring(0, MAX_CHARS_PER_FILE) + "\n\n[CONTENT TRUNCATED DUE TO SIZE LIMITS FOR THIS FILE]";
+  return text.substring(0, MAX_CHARS_PER_FILE) + "\n\n[CONTENT TRUNCATED DUE TO SIZE LIMITS]";
 };
 
 const fileToGenerativePart = async (file: File): Promise<Part> => {
@@ -77,22 +80,9 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
             content += `\n--- Sheet: ${sheetName} ---\n${csv}\n`;
         }
       });
-
-      if (!content.trim()) {
-        content = "Empty Excel file or no readable data found.";
-      }
-
-      const truncatedContent = truncateText(content);
-      const base64Data = btoa(unescape(encodeURIComponent(truncatedContent)));
-
-      return {
-        inlineData: {
-          data: base64Data,
-          mimeType: 'text/plain'
-        }
-      };
+      const truncatedContent = truncateText(content || "Empty Excel file.");
+      return { inlineData: { data: btoa(unescape(encodeURIComponent(truncatedContent))), mimeType: 'text/plain' } };
     } catch (error) {
-      console.error("Error processing Excel file:", error);
       throw new Error(`Failed to process Excel file ${file.name}.`);
     }
   }
@@ -103,68 +93,9 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
         const mammoth = await import('mammoth');
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-        const textContent = truncateText(result.value);
-        
-        const base64Data = btoa(unescape(encodeURIComponent(textContent)));
-
-        return {
-            inlineData: {
-                data: base64Data,
-                mimeType: 'text/plain'
-            }
-        };
+        return { inlineData: { data: btoa(unescape(encodeURIComponent(truncateText(result.value)))), mimeType: 'text/plain' } };
     } catch (error) {
-        console.error("Error processing Word file:", error);
         throw new Error(`Failed to process Word file ${file.name}.`);
-    }
-  }
-
-  if (ext === 'pptx') {
-    try {
-        // @ts-ignore
-        const JSZip = (await import('jszip')).default;
-        const zip = await JSZip.loadAsync(await file.arrayBuffer());
-        
-        const slideFiles = Object.keys(zip.files).filter(name => 
-            name.match(/^ppt\/slides\/slide\d+\.xml$/)
-        );
-
-        slideFiles.sort((a, b) => {
-            const numA = parseInt(a.match(/slide(\d+)\.xml/)![1]);
-            const numB = parseInt(b.match(/slide(\d+)\.xml/)![1]);
-            return numA - numB;
-        });
-
-        let fullText = "";
-
-        for (const fileName of slideFiles) {
-            const slideXml = await zip.files[fileName].async("string");
-            const matches = slideXml.match(/<a:t[^>]*>(.*?)<\/a:t>/g);
-            if (matches) {
-                const slideText = matches.map(m => m.replace(/<\/?a:t[^>]*>/g, '')).join(' ');
-                const slideNum = fileName.match(/slide(\d+)\.xml/)![1];
-                fullText += `\n--- Slide ${slideNum} ---\n${slideText}\n`;
-            }
-            if (fullText.length > MAX_CHARS_PER_FILE) break;
-        }
-
-        if (!fullText.trim()) {
-            fullText = "Empty PowerPoint file or no readable text found.";
-        }
-
-        const truncatedContent = truncateText(fullText);
-        const base64Data = btoa(unescape(encodeURIComponent(truncatedContent)));
-
-        return {
-            inlineData: {
-                data: base64Data,
-                mimeType: 'text/plain'
-            }
-        };
-
-    } catch (error) {
-        console.error("Error processing PowerPoint file:", error);
-        throw new Error(`Failed to process PowerPoint file ${file.name}.`);
     }
   }
 
@@ -173,20 +104,10 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
     reader.onloadend = () => {
       const base64String = reader.result as string;
       const base64Data = base64String.split(',')[1];
-      
-      let mimeType = file.type;
-
-      if (ext === 'eml' || mimeType === 'message/rfc822') {
-        mimeType = 'text/plain';
-      }
-      if (ext === 'csv' && !mimeType) {
-        mimeType = 'text/csv';
-      }
-
       resolve({
         inlineData: {
           data: base64Data,
-          mimeType: mimeType || 'application/octet-stream'
+          mimeType: file.type || 'application/octet-stream'
         }
       });
     };
@@ -196,132 +117,62 @@ const fileToGenerativePart = async (file: File): Promise<Part> => {
 };
 
 export const generateAuditMemo = async (data: AuditFormData): Promise<string> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key is missing. Please check your environment variables.");
-  }
-
+  if (!process.env.API_KEY) throw new Error("API Key is missing.");
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   const filePartsNested = await Promise.all(data.files.map(async (file) => {
     const part = await fileToGenerativePart(file);
-    return [
-        { text: `\n--- Start of File Reference: "${file.name}" ---\n` },
-        part,
-        { text: `\n--- End of File Reference: "${file.name}" ---\n` }
-    ];
+    return [{ text: `\n--- Start of File: "${file.name}" ---\n` }, part, { text: `\n--- End of File: "${file.name}" ---\n` }];
   }));
   const fileParts = filePartsNested.flat();
 
-  let populationCompletenessInstruction = "Brief description of how completeness was ensured based on the evidence.";
-  if (data.metadata.frequency === 'Quarterly') {
-    populationCompletenessInstruction = "Strictly write: 'N/A - Control is performed at a quarterly frequency. Total annual population is 4.'";
-  }
-
   const attributesInput = data.attributes && data.attributes.trim().length > 0
-    ? data.attributes
-    : "Not provided. Develop specific testing procedures starting with action verbs (e.g., 'Inspect', 'Validate', 'Reperform', 'Verify', 'Agree') based on the Control Description.";
+    ? `The user has provided these EXACT testing attributes. IA MUST test ONLY these and no others: ${data.attributes}`
+    : "No specific attributes provided. IA MUST develop specific testing procedures based on the control description.";
 
   const promptText = `
-    Please generate SOX Control Testing Documentation based on the following information:
-
+    Generate SOX Control Testing Workpaper Documentation.
+    
     **Control Information:**
     - Control Name: ${data.controlName}
     - Control Description: ${data.controlDescription}
     - Testing Attributes: ${attributesInput}
 
     **Metadata:**
-    - Control Owner: ${data.metadata.owner}
-    - Control Preparer: ${data.metadata.preparer}
+    - Owner/Preparer: ${data.metadata.owner} / ${data.metadata.preparer}
     - Frequency: ${data.metadata.frequency}
     - Risk Level: ${data.metadata.riskLevel}
-    - Population Size: ${data.metadata.populationSize}
-    - Sample Size: ${data.metadata.sampleSize}
+    - Population/Sample: ${data.metadata.populationSize} / ${data.metadata.sampleSize}
 
-    **Attached Evidence:**
-    I have attached ${data.files.length} file(s) representing the PBC (Provided by Client) documentation. 
-    
-    Please strictly follow the structure:
-    1. **Testing Overview** (Summary Table with rows: Control Name, Control Description, Control Objective, Risk, Risk Assertion, Risk Level, Conclusion Summary).
-    2. **Population and Sample** (Summary Table)
-    3. **Test Sheet** (Markdown Table with columns: **Test Attribute** (labels A, B, C, D...), **Test Attribute Description**, **Tickmark**, **Testing Notes**, **Reference**).
-    4. **Conclusion**
+    **Evidence Attached:** ${data.files.length} PBC file(s).
   `;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { text: promptText },
-          ...fileParts
-        ]
-      },
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.1, 
-      }
+      contents: { parts: [{ text: promptText }, ...fileParts] },
+      config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.1 }
     });
-
     return response.text || "No response generated.";
   } catch (error: any) {
-    console.error("Error calling Gemini API:", error);
-    if (error?.message?.includes('token count exceeds')) {
-      throw new Error("The combined size of your evidence files is too large for the AI to process in one go. Please try uploading fewer files or reducing the size of large spreadsheets/documents.");
-    }
-    throw new Error("Failed to generate audit memo. Please try again.");
+    throw new Error(error?.message || "Failed to generate audit memo.");
   }
 };
 
 export const refineAuditMemo = async (data: AuditFormData, currentMemo: string, instructions: string): Promise<string> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key is missing. Please check your environment variables.");
-  }
-
+  if (!process.env.API_KEY) throw new Error("API Key is missing.");
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
   const filePartsNested = await Promise.all(data.files.map(async (file) => {
     const part = await fileToGenerativePart(file);
-    return [
-        { text: `\n--- Start of File Reference: "${file.name}" ---\n` },
-        part,
-        { text: `\n--- End of File Reference: "${file.name}" ---\n` }
-    ];
+    return [{ text: `\n--- Start of File: "${file.name}" ---\n` }, part, { text: `\n--- End of File: "${file.name}" ---\n` }];
   }));
   const fileParts = filePartsNested.flat();
 
-  const promptText = `
-    I have a generated SOX Control Testing Memo. I need you to update it based on the Reviewer's feedback.
-
-    **Current Memo Content:**
-    ${currentMemo}
-
-    **Reviewer Instructions for Update:**
-    ${instructions}
-
-    **Task:** Update the memo strictly following the reviewer's instructions.
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { text: promptText },
-          ...fileParts
-        ]
-      },
-      config: {
-        systemInstruction: "You are an expert SOX auditor refining a testing memo.",
-        temperature: 0.1, 
-      }
-    });
-
-    return response.text || currentMemo;
-  } catch (error: any) {
-    console.error("Error calling Gemini API for refinement:", error);
-    if (error?.message?.includes('token count exceeds')) {
-      throw new Error("Update failed because the total content size exceeds limits. Try using more concise instructions or refining smaller sections.");
-    }
-    throw new Error("Failed to refine audit memo. Please try again.");
-  }
+  const promptText = `Update this SOX memo per IA standards. Reviewer Feedback: ${instructions}\n\nCurrent Memo: ${currentMemo}`;
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: { parts: [{ text: promptText }, ...fileParts] },
+    config: { systemInstruction: "You are an expert Internal Auditor refining a testing workpaper. Maintain formal documentation tone.", temperature: 0.1 }
+  });
+  return response.text || currentMemo;
 };
